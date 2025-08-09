@@ -20,6 +20,8 @@ BINANCE_API_KEYS = {
     }
 }
 
+SLACK_API_KEY = os.getent("SLACK_API_KEY")
+
 # Binance 메인넷과 테스트넷 주소
 BINANCE_BASE_URL = {
     "mainnet": "https://api.binance.com",
@@ -32,5 +34,6 @@ def get_api_config():
     return {
         "API_KEY": BINANCE_API_KEYS[env]["API_KEY"],
         "API_SECRET": BINANCE_API_KEYS[env]["API_SECRET"],
-        "BASE_URL": BINANCE_BASE_URL[env]
+        "BASE_URL": BINANCE_BASE_URL[env],
+        "SLACK_API": SLACK_API_KEY
     }
