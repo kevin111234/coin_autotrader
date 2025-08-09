@@ -58,31 +58,37 @@
 ### 4. **아키텍처 설계**
 
 ```
-main.py (실행 진입점)
+coin_autotrader/
 │
 ├── config/
-│   ├── settings.py          # 공용 설정
-│   ├── symbols.json         # 타겟 코인 목록, 전략 파라미터
+│   ├── settings.py            # 공용 설정 (API 키, 전략 파라미터, 환경 설정)
+│   ├── symbols.json           # 타겟 코인 목록 및 전략별 파라미터
 │
-├── core/
-│   ├── exchange.py          # Binance API & WebSocket 연결
-│   ├── order_executor.py    # 주문 실행(TP/SL 포함)
-│   ├── portfolio.py         # 자산·포지션 관리
+├── src/                       # 실제 코드
+│   ├── main.py                # 실행 진입점
+│   ├── exchange.py            # Binance API & WebSocket
+│   ├── order_executor.py      # 주문 실행 (TP/SL 포함)
+│   ├── portfolio.py           # 포지션/잔고 관리
+│   ├── strategy/              # 전략 모듈
+│   ├── notifier/              # Slack 알림 모듈
+│   ├── storage/               # MySQL/Redis 모듈 (선택)
+│   ├── utils/                 # 공용 함수/로그
 │
-├── strategy/
-│   ├── base_strategy.py     # 전략 인터페이스
-│   ├── ema_macd_rsi.py      # 기본 전략
+├── experiments/               # 실험별 코드 + 로그
+│   ├── 2025-08-10-testnet-ma-rsi/   
+│   │   ├── notebook.ipynb     # 실험 분석 Jupyter 노트북
+│   │   ├── results.csv        # 거래 로그
+│   │   ├── config.json        # 실험 파라미터
+│   │   └── README.md          # 실험 요약
+│   └── ...
 │
-├── storage/                 # 데이터 저장(선택)
-│   ├── mysql_handler.py     # MySQL 모듈
-│   ├── redis_handler.py     # Redis 모듈
+├── docs/                      # GitHub Pages나 문서용
+│   ├── index.md
+│   ├── strategy-overview.md
+│   └── architecture.md
 │
-├── notifier/
-│   ├── slack.py             # Slack 알림
-│
-└── utils/
-    ├── logger.py
-    ├── helpers.py
+├── README.md                  # 프로젝트 개요 + 최근 실험 요약
+└── requirements.txt
 ```
 
 * **멀티코인 설계**:

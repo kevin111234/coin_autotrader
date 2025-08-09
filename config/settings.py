@@ -20,7 +20,7 @@ BINANCE_API_KEYS = {
     }
 }
 
-SLACK_API_KEY = os.getent("SLACK_API_KEY")
+SLACK_API_KEY = os.getenv("SLACK_API_KEY")
 
 # Binance 메인넷과 테스트넷 주소
 BINANCE_BASE_URL = {
@@ -31,9 +31,14 @@ BINANCE_BASE_URL = {
 # 설정된 서버에 따라 api key를 반환하는 코드
 def get_api_config():
     env = BINANCE_ENV
-    return {
+
+    config = {
         "API_KEY": BINANCE_API_KEYS[env]["API_KEY"],
         "API_SECRET": BINANCE_API_KEYS[env]["API_SECRET"],
         "BASE_URL": BINANCE_BASE_URL[env],
         "SLACK_API": SLACK_API_KEY
     }
+    for key, value in config.items():
+        if value is None: raise ValueError(f"환경 변수 누락: {key}")
+
+    return config
