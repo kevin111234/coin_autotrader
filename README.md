@@ -56,39 +56,58 @@
 ---
 
 ### 4. **아키텍처 설계**
-
 ```
-coin_autotrader/
+COIN_AUTOTRADER/
 │
-├── config/
-│   ├── settings.py            # 공용 설정 (API 키, 전략 파라미터, 환경 설정)
-│   ├── symbols.json           # 타겟 코인 목록 및 전략별 파라미터
+├── config/                  # 환경설정, API키, 심볼/전략 설정
+│   ├── settings.py           # API 키, 환경(testnet/mainnet) 전환, Slack 키 로드
+│   ├── symbols.json          # 타겟 코인/전략/파라미터 정의
+│   └── test_connection.py    # Binance/Slack 연결 테스트 스크립트
 │
-├── src/                       # 실제 코드
-│   ├── main.py                # 실행 진입점
-│   ├── exchange.py            # Binance API & WebSocket
-│   ├── order_executor.py      # 주문 실행 (TP/SL 포함)
-│   ├── portfolio.py           # 포지션/잔고 관리
+├── src/                      # 핵심 코드
+│   ├── exchange/             # Binance API 연동 레이어
+│   │   ├── __init__.py        # 외부 노출용 통합 import
+│   │   ├── core.py            # 공용 서명/요청/시간 동기화
+│   │   ├── market.py          # 시세/캔들/심볼 정보
+│   │   ├── account.py         # 계정/잔고/주문조회
+│   │   ├── orders.py          # 주문/취소 실행
+│   │   └── ws.py              # (예정) WebSocket 실시간 데이터
+│   │
+│   ├── indicators/           # 기술적 지표 모듈
+│   │   ├── __init__.py
+│   │   ├── ta.py              # SMA, EMA, RSI, MACD, BBands, ATR, VWAP 등
+│   │   └── utils.py           # OHLCV 데이터 검증, 창 계산
+│   │
 │   ├── strategy/              # 전략 모듈
-│   ├── notifier/              # Slack 알림 모듈
-│   ├── storage/               # MySQL/Redis 모듈 (선택)
-│   ├── utils/                 # 공용 함수/로그
+│   │   ├── base.py            # 모든 전략의 추상 인터페이스
+│   │   ├── registry.py        # @register 데코레이터, 전략 레지스트리
+│   │   ├── ma_rsi.py          # EMA+RSI 전략
+│   │   ├── bbands_breakout.py # 볼린저 밴드 돌파 전략
+│   │   └── ...                # 추가 전략
+│   │
+│   ├── utils/                 # 공용 유틸 함수/로그
+│   │   └── __init__.py
+│   │
+│   ├── strategy_manager.py    # 설정파일 기반 멀티코인/멀티전략 로딩 & 실행
+│   └── main.py                # 실행 진입점 (루프: 데이터→전략→시그널 출력)
 │
-├── experiments/               # 실험별 코드 + 로그
-│   ├── 2025-08-10-testnet-ma-rsi/   
-│   │   ├── notebook.ipynb     # 실험 분석 Jupyter 노트북
-│   │   ├── results.csv        # 거래 로그
-│   │   ├── config.json        # 실험 파라미터
-│   │   └── README.md          # 실험 요약
+├── experiments/               # 실험별 코드, 데이터, 분석노트
+│   ├── 2025-08-10-testnet-ma-rsi/
+│   │   ├── notebook.ipynb
+│   │   ├── results.csv
+│   │   ├── config.json
+│   │   └── README.md
 │   └── ...
 │
-├── docs/                      # GitHub Pages나 문서용
+├── docs/                      # 문서/GitHub Pages
 │   ├── index.md
 │   ├── strategy-overview.md
 │   └── architecture.md
 │
-├── README.md                  # 프로젝트 개요 + 최근 실험 요약
-└── requirements.txt
+├── .env                        # 환경 변수 파일(API 키 등, gitignore)
+├── requirements.txt
+├── LICENSE
+└── README.md
 ```
 
 * **멀티코인 설계**:
