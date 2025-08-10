@@ -6,23 +6,35 @@ import time
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
+import pandas as pd
 from config.settings import get_api_config
 from src.exchange import get_ohlcv
-from strategy.ma_rsi import calculate_indicators, generate_signal
+from src.strategy_manager import StrategyRunner
 
-cfg = get_api_config()
+CFG = get_api_config()
 
-symbol = "BTCUSDT"
-interval = "1m"
+SYMBOLS_CFG = os.path.join(project_root, "config", "symbols.json")
+runner = StrategyRunner(SYMBOLS_CFG)
 
-while True:
-    df = get_ohlcv(symbol, interval, limit=100)  # 100개 캔들
-    df = calculate_indicators(df)
-    signal = generate_signal(df, rsi_buy=50, rsi_sell=50) # 느슨한 조건으로 테스트
-    
-    if signal:
-        print(f"[시그널 발생] {signal} @ {df.iloc[-1]['close']}")
-    else:
-        print(f"[대기] {df.iloc[-1]['close']}")
-    
-    time.sleep(5)
+def fetch_df(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+    return get_ohlcv(symbol, interval, limit=limit)
+
+if __name__ == "__main__":
+    interval = runner.interval
+
+    while True:
+        for target in runner.targets:
+            symbol = target["symbol"]
+            need = runner.required_history(symbol)
+            df = fetch_df(symbol, interval, limit=max(need, 100))
+
+            df2, signal = runner.compute(symbol, df)
+
+            last_close = float(df2.iloc[-1]["close"])
+            if signal:
+                print(f"[{symbol}] SIGNAL={signal} @ {last_close}")
+                # TODO: 주문/Slack 연동 지점
+            else:
+                print(f"[{symbol}] WAIT @ {last_close}")
+
+        time.sleep(60)

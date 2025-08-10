@@ -1,0 +1,24 @@
+{
+  "interval": "1m",
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "strategy": "ma_rsi",
+      "params": {
+        "short_window": 7,
+        "long_window": 25,
+        "rsi_period": 14,
+        "rsi_buy": 35,
+        "rsi_sell": 65
+      }
+    },
+    {
+      "symbol": "ETHUSDT",
+      "strategy": "bb_breakout",
+      "params": {
+        "period": 20,
+        "k": 2.0
+      }
+    }
+  ]
+}
