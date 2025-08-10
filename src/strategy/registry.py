@@ -6,6 +6,8 @@ REGISTRY: Dict[str, Type[Strategy]] = {}
 def register(name: str):
     """데코레이터: 전략을 이름으로 등록"""
     def deco(cls: Type[Strategy]):
+        if name in REGISTRY:
+            raise ValueError(f"중복 전략명: {name}")
         REGISTRY[name] = cls
         return cls
     return deco
