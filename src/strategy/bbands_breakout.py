@@ -1,6 +1,14 @@
 import pandas as pd
 from .base import Strategy
 from .registry import register
+import sys
+import os
+
+# 프로젝트 루트 디렉토리의 절대 경로를 구함
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
+from src.indicators import add_bbands
 
 @register("bb_breakout")
 class BollingerBreakout(Strategy):
@@ -12,16 +20,8 @@ class BollingerBreakout(Strategy):
         return period + 2
 
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        period = int(self.params.get("period", 20))
-        k = float(self.params.get("k", 2.0))
+        return add_bbands(df, int(self.params.get("period", 20)), float(self.params.get("k", 2.0)))
 
-        ma = df["close"].rolling(period).mean()
-        std = df["close"].rolling(period).std(ddof=0)
-        df["bb_mid"] = ma
-        df["bb_up"] = ma + k * std
-        df["bb_dn"] = ma - k * std
-        return df
 
     def generate_signal(self, df: pd.DataFrame):
         if len(df) < self.min_history():

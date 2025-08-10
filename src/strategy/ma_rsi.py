@@ -2,6 +2,14 @@
 import pandas as pd
 from .base import Strategy
 from .registry import register
+import sys
+import os
+
+# 프로젝트 루트 디렉토리의 절대 경로를 구함
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
+from src.indicators import add_ema, add_rsi
 
 @register("ma_rsi")
 class MaRsiStrategy(Strategy):
@@ -15,36 +23,24 @@ class MaRsiStrategy(Strategy):
         return max(sw, lw, rsi) + 2  # 직전 캔들 비교 여유분
 
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        sw = int(self.params.get("short_window", 7))
-        lw = int(self.params.get("long_window", 25))
-        rsi_period = int(self.params.get("rsi_period", 14))
-
-        df["ma_short"] = df["close"].rolling(sw).mean()
-        df["ma_long"] = df["close"].rolling(lw).mean()
-
-        delta = df["close"].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(rsi_period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(rsi_period).mean()
-        rs = gain / loss
-        df["rsi"] = 100 - (100 / (1 + rs))
-        return df
+        out = add_ema(df, int(self.params.get("short_window", 7)), "ma_short")
+        out = add_ema(out, int(self.params.get("long_window", 25)), "ma_long")
+        out = add_rsi(out, int(self.params.get("rsi_period", 14)), "rsi")
+        return out
 
     def generate_signal(self, df: pd.DataFrame):
-        rsi_buy = float(self.params.get("rsi_buy", 30))
-        rsi_sell = float(self.params.get("rsi_sell", 70))
-
         if len(df) < self.min_history(): 
             return None
+        rsi_buy = float(self.params.get("rsi_buy", 30))
+        rsi_sell = float(self.params.get("rsi_sell", 70))
+        latest, prev = df.iloc[-1], df.iloc[-2]
 
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        if pd.isna(prev["ma_short"]) or pd.isna(prev["ma_long"]) or pd.isna(latest["rsi"]):
+        if any(pd.isna(prev[["ma_short","ma_long"]])) or pd.isna(latest["rsi"]):
             return None
 
         if prev["ma_short"] <= prev["ma_long"] and latest["ma_short"] > latest["ma_long"] and latest["rsi"] < rsi_buy:
             return "BUY"
+
         if prev["ma_short"] >= prev["ma_long"] and latest["ma_short"] < latest["ma_long"] and latest["rsi"] > rsi_sell:
             return "SELL"
         return None
