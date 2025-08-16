@@ -118,3 +118,17 @@ def get_order_list(*, orderListId: int | None = None, listClientOrderId: str | N
     if orderListId:       params["orderListId"] = orderListId
     if listClientOrderId: params["listClientOrderId"] = listClientOrderId
     return request("GET", "/api/v3/orderList", params, auth=True)
+
+def get_order(symbol: str, *,
+              orderId: Optional[int] = None,
+              origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
+    """
+    역할: 단일 주문 조회 (GET /api/v3/order)
+    - FILLED/NEW/PARTIALLY_FILLED/CANCELED 등 상태 확인 및 체결량/체결가 조회
+    """
+    if not orderId and not origClientOrderId:
+        raise ValueError("orderId 또는 origClientOrderId 중 하나는 필요")
+    params: Dict[str, Any] = {"symbol": symbol}
+    if orderId: params["orderId"] = orderId
+    if origClientOrderId: params["origClientOrderId"] = origClientOrderId
+    return request("GET", "/api/v3/order", params, auth=True)
