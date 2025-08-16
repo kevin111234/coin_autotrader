@@ -1,7 +1,7 @@
 # src/exchange/filters.py
 from __future__ import annotations
 from typing import Dict, Any, Tuple
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 
 def _to_dec(x) -> Decimal:
     """
@@ -131,3 +131,24 @@ def ensure_min_notional(price, qty, f: Dict[str, Any]) -> Tuple[Decimal, Decimal
         if q2 > 0 and (q2 * p) >= f["minNotional"]:
             return p, q2, True
     return p, q, False
+
+def to_api_str(x: Decimal, step: Decimal | None = None) -> str:
+    """
+    역할: Binance 파라미터용 숫자 문자열 생성(지수표기 금지, step 정렬)
+    input:
+      - x: Decimal 값
+      - step: 정밀도 기준(stepSize/tickSize). 없으면 normalize만
+    output: '0.0002' 같은 일반 표기 문자열(불필요 0/소수점 제거)
+    """
+    q = x
+    try:
+        if step is not None and step != 0:
+            q = x.quantize(step, rounding=ROUND_DOWN)
+        else:
+            q = x.normalize()
+    except (InvalidOperation, AttributeError):
+        q = Decimal(str(x))
+    s = format(q, 'f')  # 지수표기 금지
+    if '.' in s:
+        s = s.rstrip('0').rstrip('.')
+    return s if s else '0'

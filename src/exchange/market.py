@@ -22,3 +22,18 @@ def get_ohlcv(symbol="BTCUSDT", interval="1m", limit=100) -> pd.DataFrame:
     for c in ["open","high","low","close","volume"]:
         df[c] = df[c].astype(float)
     return df[["open_time","open","high","low","close","volume"]]
+
+def get_symbol_info(symbol: str) -> Dict[str, Any]:
+    """
+    역할: /exchangeInfo 응답에서 해당 심볼의 엔트리만 뽑아 반환
+    input: symbol (e.g., "BTCUSDT")
+    output: dict (예: {"symbol": "BTCUSDT", "filters": [...], ...})
+    연결:
+      - filters.extract_filters() 에 바로 넘길 수 있음
+    """
+    data = request("GET", "/api/v3/exchangeInfo", {"symbol": symbol})
+    # Binance는 symbol 파라미터를 줘도 항상 'symbols': [ ... ] 배열로 줌
+    arr = data.get("symbols") or []
+    if not arr:
+        raise ValueError(f"Symbol not found or no symbols returned: {symbol}")
+    return arr[0]
