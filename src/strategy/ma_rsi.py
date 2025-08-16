@@ -2,12 +2,6 @@
 import pandas as pd
 from .base import Strategy
 from .registry import register
-import sys
-import os
-
-# 프로젝트 루트 디렉토리의 절대 경로를 구함
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, project_root)
 
 from src.indicators import add_ema, add_rsi
 
