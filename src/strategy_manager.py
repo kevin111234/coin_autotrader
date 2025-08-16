@@ -15,17 +15,13 @@ from src.strategy import ma_rsi as _m1  # noqa
 from src.strategy import bbands_breakout as _m2  # noqa
 
 class StrategyRunner:
-    def __init__(self, config_path: str):
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        self.interval = cfg.get("interval", "1m")
-        self.targets: List[Dict[str, Any]] = cfg["symbols"]
-        # 심볼별 전략 인스턴스 생성
-        self.strategies = {}
-        for t in self.targets:
-            sname = t["strategy"]
-            params = t.get("params", {})
-            self.strategies[t["symbol"]] = create_strategy(sname, **params)
+    def __init__(self, cfg):
+        self.interval = cfg.trading.interval
+        self.targets = cfg.trading.symbols
+        self.strategies = {
+            spec.symbol: create_strategy(spec.strategy, **spec.params)
+            for spec in self.targets
+        }
 
     def required_history(self, symbol: str) -> int:
         return self.strategies[symbol].min_history()
