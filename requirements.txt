@@ -1,0 +1,11 @@
+pandas==2.2.3
+numpy==2.0.2
+python-binance==1.0.25
+slack_sdk==3.34.0
+python-dotenv==1.0.1
+requests==2.32.3
+websockets==14.1
+python-dateutil==2.9.0.post0
+pytz==2024.2
+tzdata==2024.2
+PyYAML==6.0.2

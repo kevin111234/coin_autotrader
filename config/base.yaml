@@ -1,0 +1,56 @@
+# ==============================
+#  Auto-Trader Base Config
+# ==============================
+# 모든 실험과 운영에서 공통적으로 사용하는 설정값
+# - 운영환경(prod/test) 분리 필요 시, overlay yaml로 확장 가능
+# ==============================
+
+version: 1                # 설정 버전 (필수)
+project: coin-autotrader  # 프로젝트 이름 (로그/식별용)
+
+# ==============================
+# Trading 설정
+# ==============================
+trading:
+  # 캔들 주기 (Binance interval)
+  # 선택지: "1m", "3m", "5m", "15m", "1h", "4h", "1d" ...
+  interval: "1m"
+
+  # 매매 대상 심볼과 전략 세트
+  symbols:
+    - symbol: BTCUSDT     # 심볼 (Binance 표기)
+      strategy: ma_rsi    # 적용할 전략 이름 (@register로 등록된 이름)
+      params:
+        short_window: 7
+        long_window: 25
+        rsi_period: 14    
+        rsi_buy: 35
+        rsi_sell: 65
+
+    - symbol: ETHUSDT
+      strategy: bb_breakout
+      params:
+        period: 20
+        k: 2.0
+
+# ==============================
+# Clock Guard
+# ==============================
+clock_guard:
+  # API 요청 시 클라이언트와 Binance 서버 간 최대 허용 시간차 (ms)
+  # - 1000ms = 1초
+  # - 실제 운영 시 500~2000ms 범위 권장
+  max_offset_ms: 1000
+
+# ==============================
+# Alerts / 모니터링
+# ==============================
+alerts:
+  warn:
+    # 경고 조건
+    # - 시스템이 워닝 레벨 로그를 발생시킴
+    clock_offset_ms_gt: 250   # 클럭 오차가 250ms 이상이면 경고
+  critical:
+    # 치명적 조건
+    # - 즉시 알림/슬랙 메시지로 전달
+    order_fail_rate_gt: 0.01  # 주문 실패율 1% 초과 시 Critical
