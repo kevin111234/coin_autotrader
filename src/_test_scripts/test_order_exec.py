@@ -6,7 +6,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from src.exchange.core import sync_time
-from src.order_executor import market_buy_by_quote, limit_buy, market_sell_qty, limit_sell
+from src.order_executor import market_buy_by_quote, limit_buy, market_sell_qty, limit_sell, oco_sell_tp_sl, oco_buy_breakout
 from src.exchange.market import get_price
 
 if __name__ == "__main__":
@@ -31,3 +31,25 @@ if __name__ == "__main__":
     # 4) 지정가 매도
     r4 = limit_sell("BTCUSDT", price=118000.0, qty=0.0002, tif="GTC", dry_run=True)
     print("limit_sell:",r4)
+
+    # SELL OCO: 보유분 청산 + 손절
+    print("SELL OCO:",oco_sell_tp_sl(
+        "BTCUSDT",
+        qty=0.0002,
+        tp_price=118000.0,
+        sl_stop=116500.0,
+        sl_limit=116480.0,   # 미지정 시 stop보다 한 틱 아래 자동 설정
+        tif="GTC",
+        dry_run=True,        # testnet 실호출 전에는 True로 확인
+    ))
+
+    # BUY OCO: 돌파 진입 + 저가 대안
+    print("BUY OCO",oco_buy_breakout(
+        "BTCUSDT",
+        qty=0.0002,
+        entry_stop=118200.0,    # 위쪽 돌파
+        entry_limit=None,       # 미지정 시 stop보다 한 틱 위로
+        fallback_limit=116800.0,# 아래 대안(limit maker)
+        tif="GTC",
+        dry_run=True,
+    ))
