@@ -55,6 +55,14 @@ README.md
 
 ---
 
+## 📚 Documentation
+
+- [Architecture Overview](docs/architecture.md)
+- [Strategy Parameters](docs/strategy-params.md)  ← 전략별 파라미터 설명 문서
+- [Experiment Logs](experiments/)
+
+---
+
 ## ⚙️ 설치 & 환경 변수
 
 ```bash
