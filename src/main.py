@@ -20,4 +20,5 @@ def main():
         time.sleep(60)
 
 if __name__ == "__main__":
+    # 실행코드: python -m src.main
     main()
