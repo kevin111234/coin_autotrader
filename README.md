@@ -1,172 +1,262 @@
-# coin_autotrader
-암호화폐 자동투자 프로그램
+# coin-autotrader
 
-## **암호화폐 자동투자 프로그램 기획서**
+Binance API + Slack 알림 기반 **멀티코인 자동매매 프레임워크**.
+전략/파라미터/리스크/운영 임계치를 **YAML로 단일 진실(SoT)** 로 관리하며, Testnet/Mainnet 전환, 시간 동기화, 주문 가드 등을 갖춘다.
 
-### 1. **프로젝트 개요**
-
-* **목표**:
-
-  * Binance API에서 제공하는 실시간 OCHL 데이터 기반의 멀티코인 자동매매 프로그램 제작.
-  * 기술적 지표 중심의 보편적 매매 전략을 적용하여 높은 수익률과 안정적인 포지션 관리를 동시에 달성.
-* **특징**:
-
-  * **멀티코인 지원** (초기 설계 단계부터 확장 가능성 내장)
-  * **테스트 환경 지원** (Binance Testnet과 Mainnet 모두 사용 가능)
-  * **DB 선택적 사용** (MySQL 또는 Redis 중 하나만 채택, 필요 시 DB 없이도 실행 가능)
-  * **Slack 실시간 보고** (거래 상황, 잔고, 수익률 보고)
+> 핵심 철학: **전략 실험이 빠르고 재현 가능해야 한다.**
+> 코드 변경 없이 YAML만 바꿔 실험 · 배포 · 롤백이 가능하도록 설계.
 
 ---
 
-### 2. **사용 기술**
+## ✨ 주요 특징
 
-* **언어**: Python 3.x
-* **API**:
-
-  * Binance API & WebSocket (실시간 가격, 주문)
-  * Binance Testnet 지원 (개발/테스트용 환경 전환 가능)
-  * Slack API (실시간 알림)
-* **데이터 저장(옵션)**:
-
-  * MySQL (대규모 데이터 기록/분석)
-  * Redis (저지연·경량 데이터 캐싱)
-* **기타 라이브러리**:
-
-  * Pandas, Numpy (데이터 처리)
-  * TA-Lib / pandas\_ta (기술적 지표)
-  * Requests / aiohttp (비동기 API 호출)
+* **멀티코인 × 멀티전략**: `config/base.yaml`의 심볼/전략 매핑만 바꿔서 운용
+* **전략 플러그인 시스템**: `@register("name")`로 전략 등록 → YAML의 `strategy: name`과 자동 연결
+* **지표 모듈화**: 순수 `pandas` 기반 TA 모듈(SMA/EMA/RSI/MACD/BB/ATR/VWAP)
+* **Testnet/Mainnet 스위칭**: `.env`/`settings.py`로 안전 전환
+* **시간 동기화 & 드리프트 방어**: RTT 보정, `recvWindow` 자동 확장, `-1021` 재동기화 재시도
+* **주문 레이어 분리**: 시세/계정/주문/WS를 모듈화(`src/exchange/*`)
+* **확장성**: Slack, 포지션/리스크, DB(선택: MySQL/Redis) 추가 용이
 
 ---
 
-### 3. **매매 전략 (기본 구조)**
+## 🗂 폴더 구조
 
-* **기술적 지표 후보**:
-
-  * EMA, MACD, RSI, ATR, Bollinger Bands, OBV
-* **기본 로직 예시**:
-
-  * 매수: EMA20 > EMA60, MACD 상향 돌파, RSI > 50
-  * 매도: EMA20 < EMA60 또는 MACD 하향 돌파
-  * TP/SL 자동 설정 (진입 시 동시에 지정)
-* **멀티코인 고려 사항**:
-
-  * 각 코인별 독립 전략/포지션 관리 가능
-  * 공용 전략 파라미터 or 코인별 맞춤 전략 선택 가능
-
----
-
-### 4. **아키텍처 설계**
 ```
-COIN_AUTOTRADER/
-│
-├── config/                  # 환경설정, API키, 심볼/전략 설정
-│   ├── settings.py           # API 키, 환경(testnet/mainnet) 전환, Slack 키 로드
-│   ├── symbols.json          # 타겟 코인/전략/파라미터 정의
-│   └── test_connection.py    # Binance/Slack 연결 테스트 스크립트
-│
-├── src/                      # 핵심 코드
-│   ├── exchange/             # Binance API 연동 레이어
-│   │   ├── __init__.py        # 외부 노출용 통합 import
-│   │   ├── core.py            # 공용 서명/요청/시간 동기화
-│   │   ├── market.py          # 시세/캔들/심볼 정보
-│   │   ├── account.py         # 계정/잔고/주문조회
-│   │   ├── orders.py          # 주문/취소 실행
-│   │   └── ws.py              # (예정) WebSocket 실시간 데이터
-│   │
-│   ├── indicators/           # 기술적 지표 모듈
-│   │   ├── __init__.py
-│   │   ├── ta.py              # SMA, EMA, RSI, MACD, BBands, ATR, VWAP 등
-│   │   └── utils.py           # OHLCV 데이터 검증, 창 계산
-│   │
-│   ├── strategy/              # 전략 모듈
-│   │   ├── base.py            # 모든 전략의 추상 인터페이스
-│   │   ├── registry.py        # @register 데코레이터, 전략 레지스트리
-│   │   ├── ma_rsi.py          # EMA+RSI 전략
-│   │   ├── bbands_breakout.py # 볼린저 밴드 돌파 전략
-│   │   └── ...                # 추가 전략
-│   │
-│   ├── utils/                 # 공용 유틸 함수/로그
-│   │   └── __init__.py
-│   │
-│   ├── strategy_manager.py    # 설정파일 기반 멀티코인/멀티전략 로딩 & 실행
-│   └── main.py                # 실행 진입점 (루프: 데이터→전략→시그널 출력)
-│
-├── experiments/               # 실험별 코드, 데이터, 분석노트
-│   ├── 2025-08-10-testnet-ma-rsi/
-│   │   ├── notebook.ipynb
-│   │   ├── results.csv
-│   │   ├── config.json
-│   │   └── README.md
-│   └── ...
-│
-├── docs/                      # 문서/GitHub Pages
-│   ├── index.md
-│   ├── strategy-overview.md
-│   └── architecture.md
-│
-├── .env                        # 환경 변수 파일(API 키 등, gitignore)
-├── requirements.txt
-├── LICENSE
-└── README.md
+config/
+  base.yaml               # 전략/심볼/운영 임계치 (단일 진실)
+  config_loader.py        # YAML 로딩 + 검증 + (선택)핫리로드
+
+src/
+  main.py                 # 실행 진입점 (데이터→전략→시그널)
+  strategy_manager.py     # YAML→전략 인스턴스 생성/실행
+  strategy/
+    base.py               # Strategy 인터페이스
+    registry.py           # @register 레지스트리
+    ma_rsi.py             # EMA+RSI 전략
+    bbands_breakout.py    # 볼린저 돌파 전략
+    # ... 새 전략은 여기에 파일 추가 + @register
+  indicators/
+    ta.py                 # SMA/EMA/RSI/MACD/BB/ATR/VWAP
+    utils.py              # 데이터 검증/타입 변환
+  exchange/
+    __init__.py           # 외부 노출 모듈 집계
+    core.py               # 서명/요청/시간동기화/재시도
+    market.py             # 가격/캔들/심볼 정보
+    account.py            # 계정/잔고/주문조회
+    orders.py             # test order/실주문/취소
+    # ws.py               # (선택) 실시간 WS
+
+docs/
+  strategy-params.md      # 전략/파라미터 사양서 (참고 문서)
+
+README.md
 ```
 
-* **멀티코인 설계**:
+---
 
-  * `symbols.json`에 코인 목록 & 전략 파라미터 정의
-  * 메인 루프에서 각 코인별로 비동기 처리
-  * 포지션, 주문, TP/SL 관리도 코인별 객체 단위로 분리
+## ⚙️ 설치 & 환경 변수
+
+```bash
+pip install -r requirements.txt
+# 필요한 핵심: requests, pandas, python-dotenv, ruamel.yaml, pydantic
+```
+
+`.env` (레포 루트에 두고 `.gitignore` 필수)
+
+```
+BINANCE_ENV=testnet              # or mainnet
+BINANCE_MAINNET_API_KEY=xxx
+BINANCE_MAINNET_API_SECRET=yyy
+BINANCE_TESTNET_API_KEY=aaa
+BINANCE_TESTNET_API_SECRET=bbb
+SLACK_API_KEY=xoxb-...           # (선택) 알림
+# SLACK_CHANNEL=#trading-log     # (선택) 기본 #general
+```
 
 ---
 
-### 5. **프로그램 동작 흐름**
+## 🧾 설정: `config/base.yaml`
 
-1. **초기화**
+전략/심볼을 이 파일에서 통제. (주석 버전 예시는 이미 제공했음)
 
-   * 환경 설정 (Mainnet / Testnet 선택)
-   * 타겟 코인 목록 로드
-   * 전략 파라미터 로드
-   * Slack 시작 알림
-2. **메인 루프 (1초 단위)**
+```yaml
+version: 1
+project: coin-autotrader
 
-   * WebSocket 실시간 가격 수집
-   * 각 코인별 전략 실행 → 매매 판단
-   * 주문 실행 → TP/SL 설정
-3. **정기 보고 (30분 단위)**
+trading:
+  interval: "1m"
+  symbols:
+    - symbol: BTCUSDT
+      strategy: ma_rsi
+      params:
+        short_window: 7
+        long_window: 25
+        rsi_period: 14
+        rsi_buy: 35
+        rsi_sell: 65
+    - symbol: ETHUSDT
+      strategy: bb_breakout
+      params:
+        period: 20
+        k: 2.0
 
-   * 잔고, 포지션, 수익률 Slack 전송
-4. **종료**
+clock_guard:
+  max_offset_ms: 1000
 
-   * 최종 보고 및 로그 저장
+alerts:
+  warn: { clock_offset_ms_gt: 250 }
+  critical: { order_fail_rate_gt: 0.01 }
+```
 
----
-
-### 6. **개발 단계 로드맵**
-
-1. **기본 골격 제작**
-
-   * Binance WebSocket → 멀티코인 가격 수집
-   * Slack 알림 연결
-   * Mainnet/Testnet 스위치 기능
-2. **전략 & 주문 실행**
-
-   * 기술적 지표 계산
-   * TP/SL 자동 주문
-3. **포지션 관리**
-
-   * 코인별 포지션 독립 관리
-   * 주문 실패 시 재시도
-4. **DB 연동 (선택)**
-
-   * MySQL 또는 Redis 한쪽만 채택
-5. **안정화 & 확장**
-
-   * 전략 모듈화
-   * 멀티코인 병렬 처리 최적화
+> 전략별 파라미터 의미/권장 범위는 `docs/strategy-params.md` 참고(전략 사양서).
 
 ---
 
-### 7. **향후 확장**
+## 🧠 전략 시스템
 
-* 강화학습 전략 모듈 추가
-* 전략 자동 최적화
-* 다중 거래소 지원 (Bybit, KuCoin 등)
+* **인터페이스**: `Strategy(name/min_history/compute_indicators/generate_signal)`
+* **등록**: 전략 파일에서 `@register("ma_rsi")` 같은 식별자로 레지스트리에 등록
+* **매핑**: `base.yaml`의 `strategy: ma_rsi`가 해당 클래스에 연결
+* **호출 흐름**
+  `main.py` → `StrategyRunner`
+  → 심볼별 `get_ohlcv()` 호출 → `compute_indicators()` → `generate_signal()`
+  → `"BUY"|"SELL"|None` 반환
+
+새 전략 추가 절차:
+
+1. `src/strategy/my_strat.py` 생성 + `@register("my_strat")`
+2. `docs/strategy-params.md`에 파라미터 사양서 추가
+3. `config/base.yaml`에 심볼 매핑 추가
+
+---
+
+## 📈 지표(Indicators)
+
+`src/indicators/ta.py`에 순수 pandas 기반 지표 구현:
+SMA, EMA, RSI(Wilder), MACD, Bollinger Bands, ATR, VWAP (+ 합성 `add_indicators`).
+
+원칙:
+
+* 입력 df **복사 → 컬럼 추가 → 반환**
+* NaN은 전략의 `min_history()`로 방어
+* dtype 강제 변환으로 실수형 보장
+
+---
+
+## 🔌 Binance 연동 레이어
+
+* `exchange/core.py`
+
+  * `_TIME_OFFSET_MS` 보정 + `now_ms()`
+  * 서명: `HMAC_SHA256(secret, urlencode(params))`
+  * `request()`에서 HTTP 오류 파싱, `-1021` 감지 시 **time sync 후 1회 재시도**
+  * `sync_time()`은 RTT 보정·median 사용, drift 크면 `recvWindow` 자동 확대(옵션)
+
+* `exchange/market.py`
+
+  * `get_ohlcv(symbol, interval, limit)` → DataFrame
+  * `get_price(symbol)`, `get_exchange_info(symbol)`
+
+* `exchange/account.py`
+
+  * `get_account()`, `get_open_orders()`, `get_order(...)`
+
+* `exchange/orders.py`
+
+  * `place_test_order(...)` → **유효성만 검사(응답 `{}` 정상)**
+  * `place_order(...)` → 실주문 (기본 `allow_mainnet=False` 가드)
+  * `cancel_order(...)`, `cancel_open_orders(symbol)`
+
+> 실주문 붙일 때는 **LOT\_SIZE/MIN\_NOTIONAL/PRICE\_FILTER** 보정 유틸을 추가해 수량/가격을 필터에 맞춰 정규화하는 것을 권장.
+
+---
+
+## ▶️ 실행
+
+```bash
+# 1) 환경 확인 (키/권한/시계)
+python config/test_connection.py     # (원하면 유지) 서버시간/키 로드 확인
+# 또는: from src.exchange import sync_time, ping; sync_time(); ping()
+
+# 2) 메인 루프
+python src/main.py
+# 출력 예: 
+# [BTCUSDT] WAIT @ 116489.99
+# [ETHUSDT] SIGNAL=BUY @ 3450.12
+```
+
+> 현재 메인은 “데이터→전략→시그널”까지만.
+> **주문/Slack 연결 지점**은 `main.py`에서 TODO로 표시된 곳에 결선.
+
+---
+
+## 🧪 주문 레이어 테스트
+
+```python
+from src.exchange import sync_time, get_account, get_price, place_test_order
+sync_time()
+print(get_account()["balances"][:2])        # testnet 기본 잔고
+print(get_price("BTCUSDT"))
+print(place_test_order("BTCUSDT", "BUY", "MARKET", quote_order_qty=10))  # {}면 OK
+```
+
+> **주의**: `/api/v3/order/test`는 항상 `{}`. 실체결이 아님.
+> 실주문은 `place_order(..., allow_mainnet=False)`로 testnet에서만 시도 권장.
+
+---
+
+## 🛠 개발 워크플로우(권장)
+
+1. **전략 아이디어/실험 설계**: `docs/` 또는 개인 노트
+2. **전략 구현**: `src/strategy/*.py` + `@register`
+3. **파라미터 정의**: `docs/strategy-params.md` 업데이트
+4. **실험 구성**: `config/base.yaml` 수정(심볼/전략/파라미터)
+5. **실행 & 로깅**: 콘솔/CSV/Slack(추가 예정)
+6. **회고**: 결과 정리 → `experiments/날짜-설명/README.md`
+
+> Git에서 실험 단위로 **branch/tag** 운용 추천.
+
+---
+
+## 🧯 트러블슈팅
+
+* **`-1021 Timestamp ...`**
+  `sync_time()` 호출. drift 크면 `auto_increase_recv_window=True` 옵션 사용.
+  네트워크/OS 시계도 NTP로 맞출 것.
+
+* **`-1013 / -1111` 수량/가격 에러**
+  심볼의 `LOT_SIZE`, `PRICE_FILTER`, `MIN_NOTIONAL` 확인 → 주문 전 보정.
+
+* **`test order: {}`만 나옴**
+  정상. 유효성 검사를 통과했다는 의미. 실체결이 아님.
+
+* **Mainnet 오발주 방지**
+  `place_order(..., allow_mainnet=False)` 기본. Mainnet에서 True로 바꾸지 않으면 예외.
+
+---
+
+## 📚 참고 문서
+
+* 전략/파라미터 사양서: `docs/strategy-params.md`
+  (전략 목록, 파라미터 의미, 권장 범위, YAML 스니펫 모음)
+
+---
+
+## 🗺 로드맵(요약)
+
+* 주문 수량/가격 **필터 보정 유틸**
+* **Slack 알림**(시그널/주문/오류/상태 보고)
+* **OCO 기반 TP/SL** 자동화
+* 포트폴리오/리스크 엔진(일손실Cap, 심볼별 상한, 쿨다운)
+* WebSocket 실시간 틱 → 인크리멘탈 업데이트
+* 백테스트 파이프 및 자동 리포트
+
+---
+
+### 마지막 체크리스트
+
+* `.env`에 키 추가 및 `BINANCE_ENV=testnet` 확인
+* `config/base.yaml` 심볼/전략/파라미터 셋업
+* `python src/main.py`로 시그널 출력 확인
+* 주문을 붙일 땐 test order → 실주문 순으로 점진적 검증
