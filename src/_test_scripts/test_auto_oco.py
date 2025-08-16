@@ -9,22 +9,21 @@ sys.path.insert(0, project_root)
 from src.exchange.auto_oco import market_buy_then_attach_oco
 
 # DRY-RUN: 현재가 가정 + OCO payload 미리보기
-print(market_buy_then_attach_oco(
-    "BTCUSDT",
-    quote_usdt=10,
-    tp_pct=0.01,        # +1%
-    sl_pct=0.005,       # -0.5%
-    dry_run=True,
-    auto_adjust=True
-))
-
-# 실 테스트넷 호출(실계정 차단은 order_executor 하위에서 처리)
 # print(market_buy_then_attach_oco(
 #     "BTCUSDT",
 #     quote_usdt=10,
-#     tp_pct=0.01,
-#     sl_pct=0.005,
-#     dry_run=False,
-#     allow_mainnet=False,   # 안전!
+#     tp_pct=0.01,        # +1%
+#     sl_pct=0.005,       # -0.5%
+#     dry_run=True,
 #     auto_adjust=True
 # ))
+
+res = market_buy_then_attach_oco(
+    "BTCUSDT",
+    quote_usdt=10,
+    tp_pct=0.01, sl_pct=0.005,
+    dry_run=False,           # ← 실호출
+    allow_mainnet=False,     # ← 안전 가드 유지
+    auto_adjust=True
+)
+print(res)

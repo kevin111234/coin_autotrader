@@ -1,7 +1,6 @@
 # src/exchange/orders.py
 from __future__ import annotations
-from typing import Optional
-from typing import Dict, Any, Optional
+from typing import Optional, Dict, Any
 from src.exchange.core import request  # 서명/타임스탬프/recvWindow 처리
 from src.exchange.core import ENV      # mainnet 보호 가드에 사용
 
@@ -73,13 +72,12 @@ def place_oco_order(
 
     params = {
         "symbol": symbol,
-        "side": side,
+        "side": side.upper(),
         "quantity": quantity,
         "aboveType": aboveType,
         "belowType": belowType,
         "newOrderRespType": newOrderRespType,
     }
-    # 선택 파라미터만 추가
     if listClientOrderId:  params["listClientOrderId"]  = listClientOrderId
     if aboveClientOrderId: params["aboveClientOrderId"] = aboveClientOrderId
     if belowClientOrderId: params["belowClientOrderId"] = belowClientOrderId
@@ -90,14 +88,10 @@ def place_oco_order(
     if belowStopPrice:     params["belowStopPrice"]     = belowStopPrice
     if belowTimeInForce:   params["belowTimeInForce"]   = belowTimeInForce
 
-    # HMAC 서명 포함 private 요청
-    return request("POST", "/api/v3/orderList/oco", params, auth=True)
+    return request("POST", "/api/v3/orderList/oco", params, signed=True)
 
 def cancel_order_list(*, orderListId: int | None = None, listClientOrderId: str | None = None,
                       allow_mainnet: bool = False) -> Dict[str, Any]:
-    """
-    역할: OCO/OTO/OTOCO 등 'order list' 취소 (DELETE /api/v3/orderList)
-    """
     if (ENV == "mainnet") and (not allow_mainnet):
         raise RuntimeError("mainnet cancel order list blocked")
     if not orderListId and not listClientOrderId:
@@ -106,29 +100,32 @@ def cancel_order_list(*, orderListId: int | None = None, listClientOrderId: str 
     params: Dict[str, Any] = {}
     if orderListId:       params["orderListId"] = orderListId
     if listClientOrderId: params["listClientOrderId"] = listClientOrderId
-    return request("DELETE", "/api/v3/orderList", params, auth=True)
+    return request("DELETE", "/api/v3/orderList", params, signed=True)
 
 def get_order_list(*, orderListId: int | None = None, listClientOrderId: str | None = None) -> Dict[str, Any]:
-    """
-    역할: 특정 order list 조회 (GET /api/v3/orderList)
-    """
     if not orderListId and not listClientOrderId:
         raise ValueError("orderListId 또는 listClientOrderId 중 하나는 필요")
     params: Dict[str, Any] = {}
     if orderListId:       params["orderListId"] = orderListId
     if listClientOrderId: params["listClientOrderId"] = listClientOrderId
-    return request("GET", "/api/v3/orderList", params, auth=True)
+    return request("GET", "/api/v3/orderList", params, signed=True)
 
 def get_order(symbol: str, *,
               orderId: Optional[int] = None,
               origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
-    """
-    역할: 단일 주문 조회 (GET /api/v3/order)
-    - FILLED/NEW/PARTIALLY_FILLED/CANCELED 등 상태 확인 및 체결량/체결가 조회
-    """
     if not orderId and not origClientOrderId:
         raise ValueError("orderId 또는 origClientOrderId 중 하나는 필요")
     params: Dict[str, Any] = {"symbol": symbol}
     if orderId: params["orderId"] = orderId
     if origClientOrderId: params["origClientOrderId"] = origClientOrderId
-    return request("GET", "/api/v3/order", params, auth=True)
+    return request("GET", "/api/v3/order", params, signed=True)
+
+def get_order_safe(symbol: str, *,
+                   orderId: Optional[int] = None,
+                   origClientOrderId: Optional[str] = None) -> Dict[str, Any]:
+    try:
+        return get_order(symbol, orderId=orderId, origClientOrderId=origClientOrderId)
+    except Exception:
+        if orderId and origClientOrderId:
+            return get_order(symbol, orderId=None, origClientOrderId=origClientOrderId)
+        raise
