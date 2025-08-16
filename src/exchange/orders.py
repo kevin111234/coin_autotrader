@@ -1,6 +1,9 @@
 # src/exchange/orders.py
+from __future__ import annotations
 from typing import Optional
-from .core import request, ENV
+from typing import Dict, Any, Optional
+from src.exchange.core import request  # 서명/타임스탬프/recvWindow 처리
+from src.exchange.core import ENV      # mainnet 보호 가드에 사용
 
 def place_test_order(symbol: str, side: str, type_: str="MARKET",
                      quantity: float=None, quote_order_qty: float=None, **extra):
@@ -39,3 +42,79 @@ def cancel_order(symbol: str, orderId: int=None, clientOrderId: str=None):
 
 def cancel_open_orders(symbol: str):
     return request("DELETE", "/api/v3/openOrders", {"symbol": symbol}, signed=True)
+
+def place_oco_order(
+    symbol: str,
+    side: str,  # "BUY" | "SELL"
+    *,
+    quantity: str,
+    aboveType: str,
+    belowType: str,
+    abovePrice: Optional[str] = None,
+    aboveStopPrice: Optional[str] = None,
+    aboveTimeInForce: Optional[str] = None,
+    belowPrice: Optional[str] = None,
+    belowStopPrice: Optional[str] = None,
+    belowTimeInForce: Optional[str] = None,
+    listClientOrderId: Optional[str] = None,
+    aboveClientOrderId: Optional[str] = None,
+    belowClientOrderId: Optional[str] = None,
+    newOrderRespType: str = "RESULT",
+    allow_mainnet: bool = False,
+) -> Dict[str, Any]:
+    """
+    역할: Spot OCO 생성 (신규 엔드포인트 /api/v3/orderList/oco).
+    input: Binance가 요구하는 OCO 파라미터들(문자열로 전달 권장)
+    output: Binance 응답 JSON(dict)
+    주의: OCO는 /order/test가 없음 → 실제 엔진으로 들어감. 테스트는 testnet에서만.
+    """
+    if (ENV == "mainnet") and (not allow_mainnet):
+        raise RuntimeError("mainnet OCO blocked (allow_mainnet=False)")
+
+    params = {
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "aboveType": aboveType,
+        "belowType": belowType,
+        "newOrderRespType": newOrderRespType,
+    }
+    # 선택 파라미터만 추가
+    if listClientOrderId:  params["listClientOrderId"]  = listClientOrderId
+    if aboveClientOrderId: params["aboveClientOrderId"] = aboveClientOrderId
+    if belowClientOrderId: params["belowClientOrderId"] = belowClientOrderId
+    if abovePrice:         params["abovePrice"]         = abovePrice
+    if aboveStopPrice:     params["aboveStopPrice"]     = aboveStopPrice
+    if aboveTimeInForce:   params["aboveTimeInForce"]   = aboveTimeInForce
+    if belowPrice:         params["belowPrice"]         = belowPrice
+    if belowStopPrice:     params["belowStopPrice"]     = belowStopPrice
+    if belowTimeInForce:   params["belowTimeInForce"]   = belowTimeInForce
+
+    # HMAC 서명 포함 private 요청
+    return request("POST", "/api/v3/orderList/oco", params, auth=True)
+
+def cancel_order_list(*, orderListId: int | None = None, listClientOrderId: str | None = None,
+                      allow_mainnet: bool = False) -> Dict[str, Any]:
+    """
+    역할: OCO/OTO/OTOCO 등 'order list' 취소 (DELETE /api/v3/orderList)
+    """
+    if (ENV == "mainnet") and (not allow_mainnet):
+        raise RuntimeError("mainnet cancel order list blocked")
+    if not orderListId and not listClientOrderId:
+        raise ValueError("orderListId 또는 listClientOrderId 중 하나는 필요")
+
+    params: Dict[str, Any] = {}
+    if orderListId:       params["orderListId"] = orderListId
+    if listClientOrderId: params["listClientOrderId"] = listClientOrderId
+    return request("DELETE", "/api/v3/orderList", params, auth=True)
+
+def get_order_list(*, orderListId: int | None = None, listClientOrderId: str | None = None) -> Dict[str, Any]:
+    """
+    역할: 특정 order list 조회 (GET /api/v3/orderList)
+    """
+    if not orderListId and not listClientOrderId:
+        raise ValueError("orderListId 또는 listClientOrderId 중 하나는 필요")
+    params: Dict[str, Any] = {}
+    if orderListId:       params["orderListId"] = orderListId
+    if listClientOrderId: params["listClientOrderId"] = listClientOrderId
+    return request("GET", "/api/v3/orderList", params, auth=True)
