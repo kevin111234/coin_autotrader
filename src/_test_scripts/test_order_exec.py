@@ -6,7 +6,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
 
 from src.exchange.core import sync_time
-from src.order_executor import market_buy_by_quote, limit_buy, market_sell_qty
+from src.order_executor import market_buy_by_quote, limit_buy, market_sell_qty, limit_sell
 from src.exchange.market import get_price
 
 if __name__ == "__main__":
@@ -27,3 +27,7 @@ if __name__ == "__main__":
     # 3) 시장가 매도 (수량 예시) — dry_run=True
     r3 = market_sell_qty(sym, qty=0.0002, dry_run=True)
     print("market_sell_qty:", r3)
+
+    # 4) 지정가 매도
+    r4 = limit_sell("BTCUSDT", price=118000.0, qty=0.0002, tif="GTC", dry_run=True)
+    print("limit_sell:",r4)
