@@ -3,11 +3,22 @@ from __future__ import annotations
 import time, uuid
 from typing import Dict, Any
 from decimal import Decimal, ROUND_UP
+from src.exchange.account import get_balances_map, get_symbol_assets
 from src.exchange.market import get_price, get_symbol_info
 from src.exchange.orders import place_test_order, place_order, place_oco_order
 from src.exchange.filters import (
     extract_filters, normalize_qty, normalize_price, ensure_min_notional, to_api_str
 )
+
+# ------ 공용 유틸(OCO BUY 주문용) -------
+def _max_required_quote_for_buy(q_dec: Decimal, prices: list[Decimal]) -> Decimal:
+    """
+    역할: BUY 시 잠재적으로 체결될 수 있는 다리들 중
+         '가장 큰 notional'을 계산하여 필요한 USDT를 추정.
+    """
+    if not prices:
+        return Decimal("0")
+    return q_dec * max(prices)
 
 # ----- 재시도/백오프 정책 -----
 RETRYABLE_HTTP = {429, 418, 500, 502, 503, 504}
@@ -320,6 +331,7 @@ def oco_sell_tp_sl(
     """
     sx = get_symbol_info(symbol)
     ff = extract_filters(sx)  # dict: {tickSize, stepQty, minNotional, ...}
+    base, quote = get_symbol_assets(sx)
 
     last = Decimal(str(get_price(symbol)))
     p_tp  = normalize_price(tp_price, ff)            # 위 다리 limit
@@ -330,6 +342,17 @@ def oco_sell_tp_sl(
     p_slm = normalize_price(sl_limit, ff)            # 아래 다리 limit(price)
 
     q_dec = normalize_qty(qty, ff)
+
+    # 잔고 사전검증: base 자산 보유량 확인
+    balances = get_balances_map()
+    base_free = balances.get(base, Decimal("0"))
+    if q_dec > base_free:
+        return {
+            "ok": False, "reason": "INSUFFICIENT_BASE_BALANCE",
+            "required_qty": to_api_str(q_dec, ff.get("stepQty")),
+            "base_free": to_api_str(base_free, ff.get("stepQty")),
+            "asset": base
+        }
 
     # 1) 가격 관계식 사전 검증 (SELL)
     #    LIMIT_MAKER price > last > STOP stopPrice
@@ -343,6 +366,16 @@ def oco_sell_tp_sl(
         return {
             "ok": False, "reason": "STOP_LIMIT_RELATION_INVALID",
             "explain": f"stopLimitPrice({p_slm}) <= stopPrice({p_stp}) 권장(거부될 수 있음)."
+        }
+
+    # 전송 ‘직전’ 재검증(메이커 보장 여유)
+    last2 = Decimal(str(get_price(symbol)))
+    if not (Decimal(p_tp) > last2 > Decimal(p_stp)):
+        # 마지막가 변동으로 관계식 깨지면 한 틱 보정 or 실패 반환
+        # 보수적: 실패 반환
+        return {
+            "ok": False, "reason": "PRICE_RELATION_CHANGED",
+            "prev": f"{to_api_str(last, ff.get('tickSize'))}", "now": to_api_str(last2, ff.get("tickSize"))
         }
 
     # 2) 최소주문가치(MIN_NOTIONAL) 충족 확인(두 다리 모두)
@@ -400,7 +433,11 @@ def oco_sell_tp_sl(
         )
         return {"ok": True, "resp": res}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        msg = str(e)
+        # (NEW) 잘 알려진 에러 메시지 가독화
+        if "insufficient balance" in msg.lower() or "-2010" in msg:
+            return {"ok": False, "error": "INSUFFICIENT_BALANCE", "detail": msg}
+        return {"ok": False, "error": msg}
 
 def oco_buy_breakout(
     symbol: str,
@@ -420,6 +457,7 @@ def oco_buy_breakout(
     """
     sx = get_symbol_info(symbol)
     ff = extract_filters(sx)
+    base, quote = get_symbol_assets(sx)
 
     last = Decimal(str(get_price(symbol)))
     p_stp = normalize_price(entry_stop, ff)          # 위쪽 stopPrice
@@ -429,6 +467,21 @@ def oco_buy_breakout(
     p_lim = normalize_price(fallback_limit, ff)      # 아래 limit maker
 
     q_dec = normalize_qty(qty, ff)
+
+    # (NEW) 잔고 사전검증: quote(USDT) 필요액 계산
+    # 잠재 체결가 후보 = [위 다리 stop-limit price, 아래 다리 limit price]
+    cand_prices = [Decimal(p_slm), Decimal(p_lim)]
+    need_quote = _max_required_quote_for_buy(q_dec, cand_prices)
+
+    balances = get_balances_map()
+    quote_free = balances.get(quote, Decimal("0"))
+    if need_quote > quote_free:
+        return {
+            "ok": False, "reason": "INSUFFICIENT_QUOTE_BALANCE",
+            "required_quote": to_api_str(need_quote, ff.get("tickSize")),
+            "quote_free": to_api_str(quote_free, ff.get("tickSize")),
+            "asset": quote
+        }
 
     # 1) 가격 관계식 (BUY)
     #    LIMIT_MAKER price < last < STOP stopPrice
@@ -442,6 +495,14 @@ def oco_buy_breakout(
         return {
             "ok": False, "reason": "STOP_LIMIT_RELATION_INVALID",
             "explain": f"stopLimitPrice({p_slm}) >= stopPrice({p_stp}) 권장."
+        }
+
+    # 전송 직전 재검증(관계식 유지 + 여유 틱 보정 옵션)
+    last2 = Decimal(str(get_price(symbol)))
+    if not (Decimal(p_lim) < last2 < Decimal(p_stp)):
+        return {
+            "ok": False, "reason": "PRICE_RELATION_CHANGED",
+            "prev": to_api_str(last, ff.get("tickSize")), "now": to_api_str(last2, ff.get("tickSize"))
         }
 
     # 2) 최소주문가치 확인(세 다리 중 활성화될 두 다리 대비)
@@ -494,4 +555,7 @@ def oco_buy_breakout(
         )
         return {"ok": True, "resp": res}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        msg = str(e)
+        if "insufficient balance" in msg.lower() or "-2010" in msg:
+            return {"ok": False, "error": "INSUFFICIENT_BALANCE", "detail": msg}
+        return {"ok": False, "error": msg}
