@@ -72,7 +72,10 @@ def market_buy_by_quote(
     qty_str   = to_api_str(qty_dec, ff.get("stepQty"))
 
     if qty_dec <= 0:
-        return {"ok": False, "reason": "MIN_QTY_NOT_SATISFIED", "price": price_str, "qty": qty_str}
+        return {"ok": False, 
+                "reason": "MIN_QTY_NOT_SATISFIED",
+                "price": price_str, 
+                "qty": qty_str}
 
     cid = _new_client_id("mbuy")
 
@@ -89,13 +92,21 @@ def market_buy_by_quote(
     for i in range(MAX_RETRY + 1):
         try:
             res = _call()
-            return {"ok": True, "resp": res, "price": price_str, "qty": qty_str, "clientOrderId": cid}
+            return {"ok": True, 
+                    "resp": res, 
+                    "price": price_str, 
+                    "qty": qty_str, 
+                    "clientOrderId": cid}
         except Exception as e:
             last_err = e
             if i < MAX_RETRY:
                 time.sleep(BACKOFF_S[i]); continue
             break
-    return {"ok": False, "error": str(last_err), "price": price_str, "qty": qty_str, "clientOrderId": cid}
+    return {"ok": False, 
+            "error": str(last_err), 
+            "price": price_str, 
+            "qty": qty_str, 
+            "clientOrderId": cid}
 
 # =============================================================================
 # 2) 지정가 매수 (price/qty 기준)
@@ -125,7 +136,10 @@ def limit_buy(
     qty_str   = to_api_str(q_adj, ff.get("stepQty"))
 
     if (q_adj <= 0) or (not ok):
-        return {"ok": False, "reason": "MIN_NOTIONAL_NOT_SATISFIED", "price": price_str, "qty": qty_str}
+        return {"ok": False, 
+                "reason": "MIN_NOTIONAL_NOT_SATISFIED", 
+                "price": price_str, 
+                "qty": qty_str}
 
     cid = _new_client_id("lbuy")
 
@@ -141,13 +155,21 @@ def limit_buy(
     for i in range(MAX_RETRY + 1):
         try:
             res = _call()
-            return {"ok": True, "resp": res, "price": price_str, "qty": qty_str, "clientOrderId": cid}
+            return {"ok": True, 
+                    "resp": res, 
+                    "price": price_str, 
+                    "qty": qty_str, 
+                    "clientOrderId": cid}
         except Exception as e:
             last_err = e
             if i < MAX_RETRY:
                 time.sleep(BACKOFF_S[i]); continue
             break
-    return {"ok": False, "error": str(last_err), "price": price_str, "qty": qty_str, "clientOrderId": cid}
+    return {"ok": False, 
+            "error": str(last_err), 
+            "price": price_str, 
+            "qty": qty_str, 
+            "clientOrderId": cid}
 
 # =============================================================================
 # 3) 시장가 매도 (수량 기준)
@@ -171,7 +193,9 @@ def market_sell_qty(
     qty_str = to_api_str(q_dec, ff.get("stepQty"))
 
     if q_dec <= 0:
-        return {"ok": False, "reason": "MIN_QTY_NOT_SATISFIED", "qty": qty_str}
+        return {"ok": False, 
+                "reason": "MIN_QTY_NOT_SATISFIED", 
+                "qty": qty_str}
 
     cid = _new_client_id("msell")
 
@@ -185,10 +209,76 @@ def market_sell_qty(
     for i in range(MAX_RETRY + 1):
         try:
             res = _call()
-            return {"ok": True, "resp": res, "qty": qty_str, "clientOrderId": cid}
+            return {"ok": True, 
+                    "resp": res, 
+                    "qty": qty_str, 
+                    "clientOrderId": cid}
         except Exception as e:
             last_err = e
             if i < MAX_RETRY:
                 time.sleep(BACKOFF_S[i]); continue
             break
-    return {"ok": False, "error": str(last_err), "qty": qty_str, "clientOrderId": cid}
+    return {"ok": False, 
+            "error": str(last_err), 
+            "qty": qty_str, 
+            "clientOrderId": cid}
+
+# =============================================================================
+# 4) 지정가 매도 (price/qty 기준)
+# =============================================================================
+def limit_sell(
+    symbol: str,
+    price: float,
+    qty: float,
+    tif: str = "GTC",
+    *,
+    dry_run: bool = True,
+    allow_mainnet: bool = False
+) -> Dict[str, Any]:
+    """
+    역할: 지정가 매도. PRICE/LOT/MIN_NOTIONAL 보정. 전송/리턴값 문자열.
+    """
+    sx = get_symbol_info(symbol)
+    ff = extract_filters(sx)
+
+    p_dec = normalize_price(price, ff)
+    q_dec = normalize_qty(qty, ff)
+    p_adj, q_adj, ok = ensure_min_notional(p_dec, q_dec, ff)
+
+    price_str = to_api_str(p_adj, ff.get("tickSize"))
+    qty_str   = to_api_str(q_adj, ff.get("stepQty"))
+
+    if (q_adj <= 0) or (not ok):
+        return {"ok": False, 
+                "reason": "MIN_NOTIONAL_NOT_SATISFIED", 
+                "price": price_str, 
+                "qty": qty_str}
+
+    cid = _new_client_id("lsell")
+
+    def _call():
+        if dry_run:
+            return place_test_order(symbol, "SELL", "LIMIT",
+                                    quantity=qty_str, price=price_str, timeInForce=tif)
+        return place_order(symbol, "SELL", "LIMIT",
+                           quantity=qty_str, price=price_str, timeInForce=tif,
+                           newClientOrderId=cid, allow_mainnet=allow_mainnet)
+
+    last_err = None
+    for i in range(MAX_RETRY + 1):
+        try:
+            res = _call()
+            return {"ok": True, 
+                    "resp": res, 
+                    "price": price_str, 
+                    "qty": qty_str, 
+                    "clientOrderId": cid}
+        except Exception as e:
+            last_err = e
+            if i < MAX_RETRY: time.sleep(BACKOFF_S[i]); continue
+            break
+    return {"ok": False, 
+            "error": str(last_err), 
+            "price": price_str, 
+            "qty": qty_str, 
+            "clientOrderId": cid}
