@@ -25,7 +25,7 @@ import os, json, time, threading
 from dataclasses import dataclass, asdict, field
 from typing import Dict, Any, Optional, List
 
-from src.exchange.orders import get_order, get_order_list
+from src.exchange.orders import get_order, get_order_list, get_open_order_lists
 
 # -------------------------
 # 데이터 모델 (직렬화 친화)
@@ -294,6 +294,41 @@ class OrderRegistry:
             ab["updated"] = int(time.time() * 1000)
             self._save()
             return oc
+        
+    def import_open_oco_minimal(self):
+        """
+        서버에 열려있는 OCO를 레지스트리에 '최소 정보'로 등록(legs는 비워둠).
+        레지스트리가 비어 있거나 손상됐을 때 1회 호출용.
+        """
+        try:
+            r = get_open_order_lists()
+        except Exception:
+            return 0
+        items = r if isinstance(r, list) else r.get("orderLists", [])
+        cnt = 0
+        with self._lock:
+            for it in items:
+                oid = str(it["orderListId"])
+                if oid in self.ocolists: 
+                    continue
+                oc = OCOList(
+                    symbol=it.get("symbol",""),
+                    orderListId=it["orderListId"],
+                    listClientOrderId=it.get("listClientOrderId",""),
+                    listStatusType=it.get("listStatusType",""),
+                    listOrderStatus=it.get("listOrderStatus",""),
+                    status_ts=int(it.get("transactionTime",0)),
+                    legs=[],            # 상세는 생략(필요시 정밀 동기화로 보강)
+                    group_id="",
+                )
+                self.ocolists[oid] = oc
+                ab = self.active_by_symbol.setdefault(oc.symbol, {"active_oco_ids": [], "updated": 0})
+                if oid not in ab["active_oco_ids"]:
+                    ab["active_oco_ids"].append(oid)
+                ab["updated"] = int(time.time()*1000)
+                cnt += 1
+            self._save()
+        return cnt
 
     # --------------- 폴링 동기화 ----------------
 

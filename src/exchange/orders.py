@@ -129,3 +129,7 @@ def get_order_safe(symbol: str, *,
         if orderId and origClientOrderId:
             return get_order(symbol, orderId=None, origClientOrderId=origClientOrderId)
         raise
+
+def get_open_order_lists() -> Dict[str, Any]:
+    # GET /api/v3/openOrderList (서명 필요)
+    return request("GET", "/api/v3/openOrderList", {}, signed=True)
