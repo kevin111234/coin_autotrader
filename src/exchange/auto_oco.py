@@ -23,6 +23,7 @@ import time
 from decimal import Decimal
 from typing import Optional, Dict, Any, Tuple
 
+from src.exchange.registry import OrderRegistry
 from src.exchange.orders import get_order, get_order_safe
 from src.exchange.market import get_symbol_info, get_price
 from src.exchange.filters import extract_filters, normalize_price, to_api_str
@@ -161,6 +162,7 @@ def market_buy_then_attach_oco(
       "note"?: str
     }
     """
+    REG = OrderRegistry()  # 기본 경로 runtime/orders_state.json
     if not quote_usdt and not buy_qty:
         return {"ok": False, "error": "quote_usdt 또는 buy_qty 중 하나는 필요"}
 
@@ -236,6 +238,9 @@ def market_buy_then_attach_oco(
         # TIMEOUT/NEW/PARTIALLY_FILLED이라도 exec_qty가 있으면 그 수량으로 진행
         if exec_qty_dec <= 0:
             return {"ok": False, "entry": ent, "oco": None, "error": "entry fill timeout", "lastError": w.get("lastError")}
+    resp = ent.get("resp") or {}
+    if not dry_run and resp:
+        REG.record_entry_from_resp(resp)
 
     # --------------------------
     # 3) TP/SL 가격 계산
@@ -243,6 +248,18 @@ def market_buy_then_attach_oco(
     tp_str, sl_str = _calc_tp_sl_prices(avg_price_dec, ff,
                                         tp_pct=tp_pct, sl_pct=sl_pct,
                                         tp_abs=tp_abs, sl_abs=sl_abs)
+
+    # OCO SELL 부착 전 중복 방지 체크
+    group_id = (resp.get("clientOrderId") if resp else ent.get("clientOrderId")) or ""
+    if not dry_run:
+        if not REG.can_attach_oco(symbol, group_id=group_id):
+            return {
+                "ok": False,
+                "entry": ent,
+                "oco": None,
+                "error": "DUPLICATE_OCO_BLOCKED",
+                "note": "해당 심볼에 진행 중인 OCO가 있어 부착 차단됨"
+            }
 
     # --------------------------
     # 4) OCO SELL 부착 (filled 수량 기준)
@@ -253,6 +270,10 @@ def market_buy_then_attach_oco(
         sl_limit=None, tif=tif,
         dry_run=False, auto_adjust=auto_adjust, allow_mainnet=allow_mainnet
     )
+
+    # OCO 생성 성공 뒤 기록
+    if not dry_run and oco.get("ok"):
+        REG.record_oco_from_resp(oco["resp"], group_id=group_id)
 
     return {
         "ok": bool(oco.get("ok")),
