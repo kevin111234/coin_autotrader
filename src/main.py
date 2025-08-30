@@ -247,7 +247,7 @@ def main():
                 safety_buffer=2                # 필요시 조정/해제 가능
             )
             # 디버깅/관찰용:
-            print(f"[{symbol}] partial meta: {meta}")
+            # print(f"[{symbol}] partial meta: {meta}")
 
             # (4) 신호 판단(전략 표준 인터페이스)
             signal = strat.generate_signal(df_cache[symbol])
