@@ -1,9 +1,11 @@
-# -*- coding: utf-8 -*-
 """
-메인 실행:
+메인 실행(부분 재계산 적용판):
 - RollingFeed로 심볼/인터벌별 '마감창'을 캐시(warm_build)
-- 매 틱: (1) 롤오버 감지/갱신 → (2) 캐시된 마감창 + 현재가 1틱을 붙여 스냅샷 DF 생성
-- 지표/시그널 계산은 기존 StrategyRunner.compute(symbol, df)로 그대로 수행
+- 매 틱:
+    (1) 롤오버 감지/갱신
+    (2) 마감창 + 현재가 1틱 스냅샷(OHLCV만)
+    (3) 부분 재계산: 지표가 비어있는 가장 이른 행부터 끝까지 compute_indicators만 호출
+    (4) Strategy.generate_signal(df_cache[symbol])로 신호 생성
 - 초기 1회만 지표 NaN의 leading 구간을 잘라내어 워밍업 문제 제거
 """
 
@@ -14,8 +16,7 @@ import pandas as pd
 from config.config_loader import load_config
 from src.exchange import get_price
 from src.strategy_manager import StrategyRunner
-
-# RollingFeed(파일기반 작은DB + 롤오버 감지)
+from src.indicators.partial_utils import partial_recompute_indicators
 from src.data.rolling_feed import RollingFeed, interval_to_ms
 
 _BASE_OHLCV = {"open_time", "open", "high", "low", "close", "volume"}
@@ -43,7 +44,7 @@ def _drop_indicator_nans(df: pd.DataFrame, *, mode: str = "leading") -> pd.DataF
     return df.loc[first_valid_idx:].reset_index(drop=True)
 
 # -------------------------------
-# 유틸: 현재가 1틱 스냅샷 생성(공용)
+# 유틸: 현재가 1틱 스냅샷 생성(OHLCV)
 # -------------------------------
 def build_snapshot_from_feed(
     feed: RollingFeed,
@@ -56,7 +57,7 @@ def build_snapshot_from_feed(
     역할:
       - feed.get_closed_window()로 캐시된 '마감창' DF를 불러온 뒤,
         현재가 1틱을 맨 뒤에 붙여 실시간 스냅샷을 만든다.
-      - 지표 계산은 Runner.compute(symbol, df)에서 수행한다(여긴 OHLCV만 구성).
+      - 지표 계산은 외부에서(partial_recompute_indicators) 수행.
     """
     closed = feed.get_closed_window(symbol, interval)
     if closed.empty:
@@ -76,61 +77,134 @@ def build_snapshot_from_feed(
     }
     df_rt = pd.concat([closed, pd.DataFrame([syn])], ignore_index=True)
 
-    # 컬럼 정규화(혹시 타입/정렬 흔들릴 수 있어 보정)
+    # 컬럼 정규화
     df_rt["open_time"] = pd.to_datetime(df_rt["open_time"], utc=True).dt.tz_convert(None)
     for c in ["open", "high", "low", "close", "volume"]:
         df_rt[c] = pd.to_numeric(df_rt[c], errors="coerce")
     df_rt = df_rt.dropna(subset=["open_time","open","high","low","close","volume"]).reset_index(drop=True)
     return df_rt
 
+# ------------------------------
+# 전략 인스턴스 가져오기 헬퍼
+# ------------------------------
+def _strategy_for(runner: StrategyRunner, symbol: str):
+    """
+    역할: 심볼에 해당하는 '전략 인스턴스'를 반환.
+    - spec.strategy 가 이미 인스턴스면 그대로 반환
+    - 문자열이면 registry를 통해 인스턴스화 (spec.params 주입)
+    - runner.strategy_map 이 있으면 거기서도 검색
+    """
+    from src.strategy.base import Strategy  # isinstance 체크용
+
+    # 0) runner.targets 에서 심볼 스펙 찾기
+    spec = None
+    if hasattr(runner, "targets"):
+        for s in runner.targets:
+            if getattr(s, "symbol", None) == symbol:
+                spec = s
+                break
+    if spec is None:
+        raise RuntimeError(f"strategy spec not found for symbol={symbol}")
+
+    # 1) spec.strategy 가 인스턴스인 경우
+    strat_attr = getattr(spec, "strategy", None)
+    if isinstance(strat_attr, Strategy):
+        return strat_attr
+
+    # 2) 문자열인 경우 → registry 통해 생성
+    name = None
+    if isinstance(strat_attr, str):
+        name = strat_attr
+    else:
+        # 필드명이 다른 경우들 대비
+        for key in ("strategy_name", "name"):
+            v = getattr(spec, key, None)
+            if isinstance(v, str):
+                name = v
+                break
+    params = getattr(spec, "params", {}) or {}
+
+    if name:
+        try:
+            import src.strategy.registry as reg
+            # 선호: 생성 헬퍼가 있는 경우
+            for factory in ("create", "make", "instantiate"):
+                if hasattr(reg, factory):
+                    return getattr(reg, factory)(name, **params)
+            # 클래스 조회 후 뉴
+            for getter in ("get", "get_strategy", "get_class"):
+                if hasattr(reg, getter):
+                    cls = getattr(reg, getter)(name)
+                    return cls(**params)
+            # 딕셔너리 레지스트리 케이스
+            for table in ("REGISTRY", "registry", "STRATEGIES", "STRATEGY_REGISTRY"):
+                if hasattr(reg, table):
+                    cls = getattr(reg, table).get(name)
+                    if cls is not None:
+                        return cls(**params)
+        except Exception as e:
+            raise RuntimeError(f"strategy registry resolve failed for '{name}': {e}")
+
+    # 3) runner.strategy_map 이 있으면 활용
+    if hasattr(runner, "strategy_map"):
+        m = getattr(runner, "strategy_map")
+        st = m.get(symbol)
+        if isinstance(st, Strategy):
+            return st
+
+    raise RuntimeError(
+        f"Strategy instance not found for symbol={symbol} "
+        f"(got '{strat_attr}'). registry 연결 혹은 runner.targets[*].strategy 인스턴스 주입 필요."
+    )
+
 # -------------------------------------------
-# 초기화: RollingFeed warm + NaN leading cut
+# 초기화: RollingFeed warm + 초기 전체 계산
 # -------------------------------------------
-def init_with_rolling_feed(
+def init_with_rolling_feed_and_full_compute(
     runner: StrategyRunner,
     *,
     lookback_min: int = 300,
     nan_mode: str = "leading",
-) -> Dict[str, pd.DataFrame]:
+) -> tuple[Dict[str, pd.DataFrame], RollingFeed]:
     """
     메인 루프 '직전' 1회만 호출:
-      1) 각 심볼/인터벌에 대해 RollingFeed.warm_build_or_update 실행(전략 미지정: 지표 선계산 안 함)
-      2) feed의 '마감창' + 현재가 1틱 스냅샷 DF 생성
-      3) Runner.compute(symbol, df_rt)로 지표 선계산
+      1) 각 심볼/인터벌에 대해 RollingFeed.warm_build_or_update 실행(전략 미지정)
+      2) feed의 '마감창' + 현재가 1틱 스냅샷(OHLCV) 생성
+      3) '전체 지표 계산'으로 df_cache[symbol] 채움
       4) 지표 NaN의 leading 구간 절단
-      5) {symbol: cleaned_df} 반환 → 첫 루프 1회에 사용
+    반환: (df_cache, feed)
     """
     feed = RollingFeed()
     interval = runner.interval
-    bootstrap: Dict[str, pd.DataFrame] = {}
+    df_cache: Dict[str, pd.DataFrame] = {}
 
     for spec in runner.targets:
         symbol = spec.symbol
         need = runner.required_history(symbol)
         lookback = max(need, lookback_min)
 
-        # (1) 마감창 캐시 빌드(전략 dict은 비움: 데이터 창만 관리)
+        # (1) 마감창 캐시 빌드(전략 dict 비움: 데이터 창만 관리)
         feed.warm_build_or_update(
             symbol, interval,
             lookback=lookback,
-            strategies={},                 # 전략 지표는 Runner가 계산하므로 이곳에선 비움
+            strategies={},  # 지표는 여기서 계산 안 함
             fetch_limit_per_call=1000,
-            # trim_leading_nans는 feed가 관리하는 지표 없으므로 의미없음(어차피 Runner에서 자름)
         )
 
-        # (2) 마감창 + 현재가 1틱 스냅샷 구성
-        df_rt = build_snapshot_from_feed(feed, symbol, interval, live_price=None)
+        # (2) 마감창 + 현재가 1틱 스냅샷(OHLCV)
+        df_base = build_snapshot_from_feed(feed, symbol, interval, live_price=None)
 
-        # (3) 지표 계산은 Runner에 일임
-        df2, _ = runner.compute(symbol, df_rt)
+        # (3) 전체 지표 1회 계산 → 캐시에 저장
+        strat = _strategy_for(runner, symbol)
+        df_full = strat.compute_indicators(df_base.copy())
 
-        # (4) 초기 1회 NaN 정리
-        df2c = _drop_indicator_nans(df2, mode=nan_mode)
-        bootstrap[symbol] = df2c
+        # (4) 초기 NaN 정리
+        df_full = _drop_indicator_nans(df_full, mode=nan_mode)
 
-        print(f"[INIT] {symbol}: snap_rows={len(df2)} -> cleaned_rows={len(df2c)} (mode={nan_mode})")
+        df_cache[symbol] = df_full
+        print(f"[INIT/FULL] {symbol}: rows={len(df_full)} (nan_mode={nan_mode})")
 
-    return bootstrap, feed
+    return df_cache, feed
 
 # -----------
 # 메인 루프
@@ -140,14 +214,14 @@ def main():
     runner = StrategyRunner(CFG)
     interval = runner.interval
 
-    # (A) RollingFeed로 초기화 + 초기 1회 NaN 정리
-    bootstrap, feed = init_with_rolling_feed(
+    # (A) RollingFeed 초기화 + 전체 1회 계산으로 캐시 채우기
+    df_cache, feed = init_with_rolling_feed_and_full_compute(
         runner,
         lookback_min=300,
         nan_mode="leading",
     )
 
-    first_tick = True
+    # (B) 루프: 부분 재계산 + 신호 판단
     while True:
         for spec in runner.targets:
             symbol = spec.symbol
@@ -161,21 +235,26 @@ def main():
                 strategies={}
             )
 
-            # (2) 마감창 + 현재가 1틱 스냅샷
-            if first_tick and symbol in bootstrap and not bootstrap[symbol].empty:
-                # 초기 1회는 '정리된 DF'를 바로 사용
-                df2 = bootstrap[symbol]
-                # 시그널 재획득이 필요하면 다시 compute 호출(지표 최신화 및 일관성)
-                df2, signal = runner.compute(symbol, df2)
-            else:
-                # 평소에는 feed 기반 스냅샷 생성 → compute
-                df_rt = build_snapshot_from_feed(feed, symbol, interval, live_price=None)
-                df2, signal = runner.compute(symbol, df_rt)
+            # (2) 스냅샷(OHLCV만)
+            df_base = build_snapshot_from_feed(feed, symbol, interval, live_price=None)
 
-            price = float(df2.iloc[-1]["close"])
+            # (3) 부분 재계산: 캐시된 지표 DF(df_cache[symbol])를 기반으로 '필요한 뒤쪽만' 갱신
+            strat = _strategy_for(runner, symbol)
+            df_cache[symbol], meta = partial_recompute_indicators(
+                strat,
+                df_with_ind=df_cache[symbol],  # 직전까지 지표 포함 DF
+                df_new_base=df_base,           # 이번 틱 OHLCV 스냅샷
+                safety_buffer=2                # 필요시 조정/해제 가능
+            )
+            # 디버깅/관찰용:
+            print(f"[{symbol}] partial meta: {meta}")
+
+            # (4) 신호 판단(전략 표준 인터페이스)
+            signal = strat.generate_signal(df_cache[symbol])
+
+            price = float(df_cache[symbol].iloc[-1]["close"])
             print(f"[{symbol}] {signal or 'WAIT'} @ {price}")
 
-        first_tick = False
         time.sleep(1)  # 1초 단위 판단(원하면 조절)
 
 if __name__ == "__main__":
